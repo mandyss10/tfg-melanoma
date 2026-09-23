@@ -1,0 +1,32 @@
+# EXPERIMENTO 2 - augmentation que simula camara de movil
+# Identico al baseline SALVO la transformacion. Al no cambiar nada mas, la
+# diferencia de resultados es atribuible unicamente a la augmentation.
+name: aug
+seed: 42
+target_sensitivity: 0.95
+output_dir: results
+
+data:
+  isic_root: data/raw/isic
+  pad_root: data/raw/pad-ufes-20
+  use_mobile_in_train: false     # sigue sin ver fotos de movil reales
+  test_size: 0.3
+  val_size: 0.3
+
+transform:
+  name: mobile
+  kwargs:
+    strength: 1.0                # barrer 0.5 / 1.0 / 1.5 en el estudio de ablacion
+
+model:
+  backbone: efficientnet_b0
+  pretrained: true
+  dropout: 0.3
+  image_size: 224
+
+train:
+  epochs: 15
+  batch_size: 32
+  lr: 0.0003
+  weight_decay: 0.0001
+  num_workers: 2

@@ -1,0 +1,27 @@
+# Datos: nunca se versionan
+data/raw/
+data/processed/
+data/external/
+*.jpg
+*.jpeg
+*.png
+*.tif
+!docs/**/*.png
+!results/figures/*.png
+
+# Modelos y resultados pesados
+results/checkpoints/
+*.pth
+*.pt
+*.onnx
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+.pytest_cache/
+
+# Entorno
+.env
+.DS_Store

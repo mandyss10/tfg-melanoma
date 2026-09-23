@@ -1,0 +1,37 @@
+# EXPERIMENTO 3 - propuesta completa
+# Parte de los pesos del experimento 'aug' y hace fine-tuning incorporando la
+# particion de entrenamiento de PAD-UFES-20 (fotos de movil reales).
+#
+# IMPORTANTE: el conjunto de TEST es el mismo que en los otros dos experimentos
+# (misma semilla, mismo split), y las fotos de movil que entran aqui son solo
+# las de la particion de train. No hay fuga de datos.
+name: finetune
+seed: 42
+target_sensitivity: 0.95
+output_dir: results
+
+data:
+  isic_root: data/raw/isic
+  pad_root: data/raw/pad-ufes-20
+  use_mobile_in_train: true      # <- la diferencia con aug.yaml
+  test_size: 0.3
+  val_size: 0.3
+
+transform:
+  name: mobile
+  kwargs:
+    strength: 1.0
+
+model:
+  backbone: efficientnet_b0
+  pretrained: true
+  dropout: 0.3
+  image_size: 224
+
+train:
+  epochs: 10
+  batch_size: 32
+  lr: 0.00005                    # lr bajo: se parte de un modelo ya entrenado
+  weight_decay: 0.0001
+  num_workers: 2
+  init_from: results/aug/best.pth

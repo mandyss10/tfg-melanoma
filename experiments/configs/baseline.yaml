@@ -1,0 +1,31 @@
+# EXPERIMENTO 1 - linea base
+# Entrena solo con dermatoscopia y augmentation estandar.
+# Mide la CAIDA DE DOMINIO: cuanto pierde un modelo clinico al verse ante
+# fotografias de movil. Es el numero contra el que se compara todo lo demas.
+name: baseline
+seed: 42
+target_sensitivity: 0.95
+output_dir: results
+
+data:
+  isic_root: data/raw/isic
+  pad_root: data/raw/pad-ufes-20
+  use_mobile_in_train: false     # NO ve ninguna foto de movil
+  test_size: 0.3
+  val_size: 0.3
+
+transform:
+  name: baseline
+
+model:
+  backbone: efficientnet_b0
+  pretrained: true
+  dropout: 0.3
+  image_size: 224
+
+train:
+  epochs: 15
+  batch_size: 32
+  lr: 0.0003
+  weight_decay: 0.0001
+  num_workers: 2
