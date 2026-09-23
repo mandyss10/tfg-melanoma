@@ -94,12 +94,22 @@ def load_pad_ufes(root: str | Path, metadata_name: str = "metadata.csv") -> pd.D
     if desconocidas:
         raise ValueError(f"Diagnosticos no contemplados en PAD-UFES-20: {desconocidas}")
 
+    # patient_id es imprescindible: PAD-UFES-20 tiene 2.298 lesiones de solo
+    # 1.373 pacientes, asi que dividir por imagen mete al mismo paciente en
+    # train y en test. El modelo aprenderia a reconocer su piel, no la lesion.
+    if "patient_id" in df.columns:
+        patient = df["patient_id"].astype(str)
+    else:
+        print("[PAD-UFES-20] aviso: sin columna patient_id; se usa img_id como grupo")
+        patient = df["img_id"].astype(str)
+
     out = pd.DataFrame(
         {
             "path": df["img_id"].map(lambda n: index.get(n)),
             "label": diag.isin(PAD_MALIGNANT).astype(int),
             "domain": "mobile",
             "diagnostic": diag,
+            "patient_id": patient,
         }
     )
 
@@ -116,6 +126,7 @@ def load_isic(
     metadata_name: str = "metadata.csv",
     label_column: str = "target",
     image_column: str = "image_name",
+    patient_column: str = "patient_id",
 ) -> pd.DataFrame:
     """Carga un volcado de ISIC (dermatoscopia).
 
@@ -136,11 +147,20 @@ def load_isic(
 
     index = {p.stem: p for p in root.rglob("*") if p.suffix.lower() in IMAGE_SUFFIXES}
 
+    # ISIC 2020 tambien tiene varias imagenes por paciente (~33.000 imagenes de
+    # ~2.000 pacientes), asi que el grupo importa igual que en PAD-UFES-20.
+    if patient_column in df.columns:
+        patient = df[patient_column].astype(str)
+    else:
+        print(f"[ISIC] aviso: sin columna {patient_column!r}; se usa la imagen como grupo")
+        patient = df[image_column].astype(str)
+
     out = pd.DataFrame(
         {
             "path": df[image_column].map(lambda n: index.get(Path(str(n)).stem)),
             "label": df[label_column].astype(int),
             "domain": "dermoscopy",
+            "patient_id": patient,
         }
     )
 

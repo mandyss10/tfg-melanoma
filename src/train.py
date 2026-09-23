@@ -22,11 +22,11 @@ import pandas as pd
 import torch
 import torch.nn as nn
 import yaml
-from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from src.data.datasets import SkinLesionDataset, describe, load_isic, load_pad_ufes
+from src.data.datasets import SkinLesionDataset, load_isic, load_pad_ufes
+from src.data.splits import assert_no_leakage, split_report, stratified_group_split
 from src.data.transforms import build_transform
 from src.models.classifier import (
     SkinLesionClassifier,
@@ -60,9 +60,17 @@ def build_frames(cfg: dict) -> dict[str, pd.DataFrame]:
 
     frames = []
     if data.get("isic_root"):
-        frames.append(load_isic(data["isic_root"], **data.get("isic_kwargs", {})))
+        kwargs = dict(data.get("isic_kwargs", {}))
+        # En Kaggle el CSV puede llamarse train.csv en vez de metadata.csv; el
+        # autodetector rellena esta clave con el nombre real.
+        if data.get("isic_metadata"):
+            kwargs["metadata_name"] = data["isic_metadata"]
+        frames.append(load_isic(data["isic_root"], **kwargs))
     if data.get("pad_root"):
-        frames.append(load_pad_ufes(data["pad_root"]))
+        kwargs = dict(data.get("pad_kwargs", {}))
+        if data.get("pad_metadata"):
+            kwargs["metadata_name"] = data["pad_metadata"]
+        frames.append(load_pad_ufes(data["pad_root"], **kwargs))
     if not frames:
         raise ValueError("La configuracion no declara ningun dataset")
 
@@ -79,17 +87,15 @@ def build_frames(cfg: dict) -> dict[str, pd.DataFrame]:
 
     # El split de movil se hace SIEMPRE con la misma semilla en los tres
     # experimentos, de modo que comparten exactamente el mismo test.
-    mob_trainval, mob_test = train_test_split(
-        mobile,
-        test_size=data.get("test_size", 0.3),
-        stratify=mobile["label"],
-        random_state=seed,
+    #
+    # La division es POR PACIENTE, no por imagen: varios pacientes tienen mas de
+    # una lesion fotografiada, y repartirlas entre particiones permitiria al
+    # modelo reconocer al paciente en lugar de la lesion.
+    mob_trainval, mob_test = stratified_group_split(
+        mobile, test_size=data.get("test_size", 0.3), seed=seed
     )
-    mob_train, mob_val = train_test_split(
-        mob_trainval,
-        test_size=data.get("val_size", 0.3),
-        stratify=mob_trainval["label"],
-        random_state=seed,
+    mob_train, mob_val = stratified_group_split(
+        mob_trainval, test_size=data.get("val_size", 0.3), seed=seed
     )
 
     # Que parte del movil entra en entrenamiento depende del experimento:
@@ -100,11 +106,16 @@ def build_frames(cfg: dict) -> dict[str, pd.DataFrame]:
     if len(train) == 0:
         raise ValueError("El conjunto de entrenamiento esta vacio")
 
-    return {
+    frames = {
         "train": train.reset_index(drop=True),
         "val": mob_val.reset_index(drop=True),
         "test": mob_test.reset_index(drop=True),
     }
+
+    # Comprobacion explicita: si un paciente se colase en dos particiones, las
+    # metricas saldrian infladas y no habria forma de notarlo a posteriori.
+    assert_no_leakage(*frames.values())
+    return frames
 
 
 def run_epoch(model, loader, criterion, optimizer, device, train: bool):
@@ -152,8 +163,7 @@ def main():
 
     print(f"=== experimento: {name} | dispositivo: {device} ===")
     frames = build_frames(cfg)
-    for split, df in frames.items():
-        print(f"  {split:5} {describe(df)}")
+    print(split_report(frames))
 
     size = cfg["model"].get("image_size", 224)
     tf_train = build_transform(
