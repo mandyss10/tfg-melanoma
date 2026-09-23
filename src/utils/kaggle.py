@@ -24,16 +24,25 @@ KAGGLE_WORKING = Path("/kaggle/working")
 FIRMA_PAD = {"img_id", "diagnostic"}
 FIRMA_ISIC = {"image_name", "target"}
 
+# patient_id forma parte de la firma A PROPOSITO, y no solo porque haga falta
+# para dividir por paciente: el dataset cdeotte/jpeg-melanoma-256x256 incluye un
+# sample_submission.csv cuyas columnas son exactamente {image_name, target}. Sin
+# exigir patient_id, el detector podia elegir ese fichero -- que no tiene
+# imagenes reales asociadas ni etiquetas validas -- en lugar de train.csv.
 FIRMAS_PAD = [
-    {"img_id", "diagnostic"},          # esquema oficial PAD-UFES-20
-    {"img_id", "diagnostic_full"},     # alguna resubida usa el nombre largo
+    {"img_id", "diagnostic", "patient_id"},   # esquema oficial PAD-UFES-20
+    {"img_id", "diagnostic"},                 # resubida sin patient_id (peor: sin agrupar)
     {"image", "diagnostic"},
 ]
 FIRMAS_ISIC = [
-    {"image_name", "target"},          # esquema oficial SIIM-ISIC 2020
-    {"image_name", "benign_malignant"},
-    {"image", "target"},
+    {"image_name", "target", "patient_id"},   # train.csv de SIIM-ISIC 2020
+    {"image_name", "benign_malignant", "patient_id"},
+    {"image_name", "target"},                 # ultimo recurso
 ]
+
+# Ficheros que nunca son el CSV de entrenamiento, por mucho que su cabecera
+# encaje con la firma.
+CSV_EXCLUIDOS = ("sample_submission", "submission", "test")
 
 
 def is_kaggle() -> bool:
@@ -46,7 +55,19 @@ def _csvs(root: Path, max_depth: int = 4) -> list[Path]:
     for depth in range(max_depth):
         patron = "/".join(["*"] * depth + ["*.csv"]) if depth else "*.csv"
         encontrados.extend(root.glob(patron))
-    return encontrados
+
+    # Orden estable: sin esto la eleccion depende del orden del sistema de
+    # ficheros y el mismo notebook puede detectar un CSV distinto entre
+    # ejecuciones. Ademas se prefiere explicitamente un fichero llamado 'train'.
+    def prioridad(p: Path) -> tuple[int, str]:
+        nombre = p.stem.lower()
+        if any(x in nombre for x in CSV_EXCLUIDOS):
+            return (2, str(p))
+        if "train" in nombre:
+            return (0, str(p))
+        return (1, str(p))
+
+    return sorted(set(encontrados), key=prioridad)
 
 
 def _tiene_firma(csv_path: Path, firma: set[str]) -> bool:
