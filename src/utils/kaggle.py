@@ -18,8 +18,22 @@ KAGGLE_INPUT = Path("/kaggle/input")
 KAGGLE_WORKING = Path("/kaggle/working")
 
 # Firmas de cada dataset: columnas que debe tener su CSV de metadatos.
+#
+# Hay varias resubidas de ambos datasets en Kaggle y algunas renombran columnas,
+# asi que se prueban varias firmas por dataset y se acepta la primera que case.
 FIRMA_PAD = {"img_id", "diagnostic"}
 FIRMA_ISIC = {"image_name", "target"}
+
+FIRMAS_PAD = [
+    {"img_id", "diagnostic"},          # esquema oficial PAD-UFES-20
+    {"img_id", "diagnostic_full"},     # alguna resubida usa el nombre largo
+    {"image", "diagnostic"},
+]
+FIRMAS_ISIC = [
+    {"image_name", "target"},          # esquema oficial SIIM-ISIC 2020
+    {"image_name", "benign_malignant"},
+    {"image", "target"},
+]
 
 
 def is_kaggle() -> bool:
@@ -62,6 +76,54 @@ def find_dataset(firma: set[str], search_root: Path | None = None) -> tuple[Path
     return None
 
 
+def find_any(firmas: list[set[str]], search_root: Path | None = None):
+    """Prueba varias firmas y devuelve la primera coincidencia."""
+    for firma in firmas:
+        hallazgo = find_dataset(firma, search_root=search_root)
+        if hallazgo:
+            return hallazgo
+    return None
+
+
+def inspect(search_root: Path | None = None, max_cols: int = 12) -> str:
+    """Lista TODOS los CSV montados con sus columnas reales.
+
+    Primera celda a ejecutar en Kaggle. Sirve para confirmar, antes de entrenar,
+    que el dataset elegido tiene el esquema que el codigo espera: hay varias
+    resubidas de ISIC y de PAD-UFES-20 y no todas conservan los nombres
+    originales de las columnas.
+    """
+    root = search_root or KAGGLE_INPUT
+    if not root.exists():
+        return f"No existe {root}."
+
+    lineas = []
+    for dataset_dir in sorted(root.iterdir()):
+        if not dataset_dir.is_dir():
+            continue
+        lineas.append(f"\n=== {dataset_dir.name} ===")
+        csvs = _csvs(dataset_dir)
+        if not csvs:
+            lineas.append("  (sin CSV en los primeros niveles)")
+        for csv_path in csvs:
+            try:
+                df = pd.read_csv(csv_path, nrows=0)
+                cols = list(df.columns)
+                extra = f" (+{len(cols) - max_cols} mas)" if len(cols) > max_cols else ""
+                rel = csv_path.relative_to(dataset_dir)
+                lineas.append(f"  {rel}")
+                lineas.append(f"    columnas: {cols[:max_cols]}{extra}")
+            except Exception as e:
+                lineas.append(f"  {csv_path.name}: no se pudo leer ({e})")
+
+    lineas.append("\nEl codigo necesita:")
+    lineas.append("  PAD-UFES-20 -> img_id, diagnostic, patient_id")
+    lineas.append("  ISIC        -> image_name, target, patient_id")
+    lineas.append("Si los nombres no coinciden, anade la firma real a FIRMAS_* "
+                  "en src/utils/kaggle.py")
+    return "\n".join(lineas)
+
+
 def autodetect() -> dict:
     """Localiza ISIC y PAD-UFES-20 entre los datasets adjuntos.
 
@@ -70,12 +132,12 @@ def autodetect() -> dict:
     """
     resultado: dict = {}
 
-    pad = find_dataset(FIRMA_PAD)
+    pad = find_any(FIRMAS_PAD)
     if pad:
         resultado["pad_root"] = str(pad[0])
         resultado["pad_metadata"] = pad[1]
 
-    isic = find_dataset(FIRMA_ISIC)
+    isic = find_any(FIRMAS_ISIC)
     if isic:
         resultado["isic_root"] = str(isic[0])
         resultado["isic_metadata"] = isic[1]
