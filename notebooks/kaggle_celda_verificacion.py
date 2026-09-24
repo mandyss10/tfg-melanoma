@@ -25,6 +25,10 @@ print(f"PAD   {len(pad):6d} imagenes  {pad.patient_id.nunique():5d} pacientes  "
       f"prevalencia {pad.label.mean():.2%}")
 print()
 
+print("Diagnosticos en ISIC (maligno = MEL, BCC, SCC, igual que en PAD):")
+print(isic.groupby(["diagnostic", "label"]).size().to_string())
+print()
+
 print("Diagnosticos en PAD-UFES-20:")
 print(pad.groupby(["diagnostic", "label"]).size().to_string())
 print()

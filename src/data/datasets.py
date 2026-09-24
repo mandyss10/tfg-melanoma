@@ -34,6 +34,28 @@ from torch.utils.data import Dataset
 PAD_MALIGNANT = {"BCC", "SCC", "MEL"}
 PAD_BENIGN = {"ACK", "NEV", "SEK"}
 
+# ISIC usa otro vocabulario (y cambia entre ediciones: 2019 usa codigos, 2020
+# nombres completos). Se aplica la MISMA definicion de maligno que en PAD-UFES-20
+# (MEL + BCC + SCC); si no, el modelo aprenderia una tarea y se evaluaria en otra.
+# La columna `target` de ISIC no sirve para esto: solo marca melanoma.
+ISIC_MALIGNANT = {
+    "MEL", "MELANOMA",
+    "BCC", "BASAL CELL CARCINOMA",
+    "SCC", "SQUAMOUS CELL CARCINOMA",
+}
+ISIC_BENIGN = {
+    "NV", "NEVUS",
+    "AK", "ACTINIC KERATOSIS",            # premaligna, como ACK en PAD-UFES-20
+    "BKL", "SEBORRHEIC KERATOSIS", "PIGMENTED BENIGN KERATOSIS",
+    "LICHENOID KERATOSIS", "SOLAR LENTIGO", "LENTIGO NOS",
+    "DF", "DERMATOFIBROMA",
+    "VASC", "VASCULAR LESION",
+    "CAFE-AU-LAIT MACULE", "ATYPICAL MELANOCYTIC PROLIFERATION",
+}
+# Sin diagnostico concreto: se recurre a la columna `target`. En ISIC 2020 son
+# ~27.000 imagenes benignas sin subtipo.
+ISIC_SIN_DIAGNOSTICO = {"UNKNOWN", "UNK", "NAN", ""}
+
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".bmp"}
 
 
@@ -127,6 +149,7 @@ def load_isic(
     label_column: str = "target",
     image_column: str = "image_name",
     patient_column: str = "patient_id",
+    diagnosis_column: str = "diagnosis",
 ) -> pd.DataFrame:
     """Carga un volcado de ISIC (dermatoscopia).
 
@@ -147,20 +170,46 @@ def load_isic(
 
     index = {p.stem: p for p in root.rglob("*") if p.suffix.lower() in IMAGE_SUFFIXES}
 
+    if diagnosis_column in df.columns:
+        diag = df[diagnosis_column].astype(str).str.upper().str.strip()
+        desconocidas = set(diag) - ISIC_MALIGNANT - ISIC_BENIGN - ISIC_SIN_DIAGNOSTICO
+        if desconocidas:
+            raise ValueError(
+                f"Diagnosticos no contemplados en ISIC: {desconocidas}. "
+                "Anadelos a ISIC_MALIGNANT o ISIC_BENIGN en src/data/datasets.py"
+            )
+        sin_diag = diag.isin(ISIC_SIN_DIAGNOSTICO)
+        label = diag.isin(ISIC_MALIGNANT).astype(int)
+        label[sin_diag] = df.loc[sin_diag, label_column].astype(int)
+    else:
+        print(f"[ISIC] aviso: sin columna {diagnosis_column!r}; la etiqueta es "
+              f"{label_column!r}, que en ISIC suele marcar SOLO melanoma")
+        diag = pd.Series("DESCONOCIDO", index=df.index)
+        label = df[label_column].astype(int)
+
     # ISIC 2020 tambien tiene varias imagenes por paciente (~33.000 imagenes de
     # ~2.000 pacientes), asi que el grupo importa igual que en PAD-UFES-20.
+    # ISIC 2019 casi no trae patient_id: los huecos se sustituyen por la propia
+    # imagen, porque si no todos acabarian en un unico grupo "nan".
+    imagen = df[image_column].astype(str)
     if patient_column in df.columns:
-        patient = df[patient_column].astype(str)
+        patient = df[patient_column].astype(str).str.strip()
+        vacio = df[patient_column].isna() | patient.isin({"", "nan", "-1", "None"})
+        patient = patient.where(~vacio, "img_" + imagen)
+        if vacio.any():
+            print(f"[ISIC] aviso: {vacio.sum()} imagenes sin {patient_column!r}; "
+                  "se usa la imagen como grupo")
     else:
         print(f"[ISIC] aviso: sin columna {patient_column!r}; se usa la imagen como grupo")
-        patient = df[image_column].astype(str)
+        patient = "img_" + imagen
 
     out = pd.DataFrame(
         {
             "path": df[image_column].map(lambda n: index.get(Path(str(n)).stem)),
-            "label": df[label_column].astype(int),
+            "label": label.values,
             "domain": "dermoscopy",
-            "patient_id": patient,
+            "diagnostic": diag.values,
+            "patient_id": patient.values,
         }
     )
 
