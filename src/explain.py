@@ -144,18 +144,13 @@ def explain_run(
     return destino
 
 
-def explain_image(
-    image_path: str | Path, checkpoint: str | Path, device: str = "cpu"
-) -> tuple[float, np.ndarray]:
-    """Explica una imagen suelta. Lo usa la app de demo."""
-    model, meta = load_checkpoint(checkpoint, device=device)
+def explain_array(rgb: np.ndarray, model, meta: dict, device: str = "cpu") -> tuple[float, np.ndarray]:
+    """Probabilidad de malignidad y mapa Grad-CAM de una imagen RGB ya cargada.
+
+    Recibe el modelo ya cargado para que la app no lo relea en cada foto.
+    """
     size = meta.get("config", {}).get("model", {}).get("image_size", 224)
     tf = build_transform("baseline", size=size, train=False)
-
-    bgr = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
-    if bgr is None:
-        raise RuntimeError(f"No se pudo leer {image_path}")
-    rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
     tensor = tf(image=rgb)["image"].unsqueeze(0).to(device)
 
     with torch.no_grad():
@@ -164,6 +159,17 @@ def explain_image(
     cam = GradCAM(model=model, target_layers=[model.target_layer_for_cam])
     mapa = cam(input_tensor=tensor, targets=[BinaryClassifierOutputTarget(1)])[0]
     return prob, overlay_cam(denormalize(tensor[0]), mapa)
+
+
+def explain_image(
+    image_path: str | Path, checkpoint: str | Path, device: str = "cpu"
+) -> tuple[float, np.ndarray]:
+    """Explica una imagen suelta a partir de su ruta."""
+    model, meta = load_checkpoint(checkpoint, device=device)
+    bgr = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
+    if bgr is None:
+        raise RuntimeError(f"No se pudo leer {image_path}")
+    return explain_array(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB), model, meta, device)
 
 
 def main():
