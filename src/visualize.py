@@ -17,6 +17,7 @@ Uso en Kaggle (datasets adjuntos, deteccion automatica):
 
 En local:
     python -m src.visualize --isic-root data/raw/isic --pad-root data/raw/pad-ufes-20
+    python -m src.visualize --solo-curvas --runs results/baseline results/aug ...
 """
 from __future__ import annotations
 
@@ -244,9 +245,15 @@ def main():
     ap.add_argument("--isic-root")
     ap.add_argument("--pad-root")
     ap.add_argument("--search-root", help="donde buscar los datasets (por defecto /kaggle/input)")
+    ap.add_argument("--solo-curvas", action="store_true",
+                    help="solo curvas.png; no necesita los datasets (util en local)")
     args = ap.parse_args()
 
     out = Path(args.out)
+    if args.solo_curvas:
+        fig_curvas(args.runs, out / "curvas.png")
+        return
+
     datos = cargar_datos(args)
     print(f"{len(datos)} imagenes cargadas. Figuras:")
 
