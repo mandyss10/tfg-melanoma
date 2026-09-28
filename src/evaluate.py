@@ -20,16 +20,16 @@ import torch
 from torch.utils.data import DataLoader
 
 from src.data.datasets import SkinLesionDataset, describe
-from src.data.transforms import build_transform
+from src.data.transforms import eval_transform
 from src.models.classifier import load_checkpoint
 from src.utils.metrics import bootstrap_ci, compute_metrics
 
 
 @torch.no_grad()
-def predict(model, frame: pd.DataFrame, device: str, size: int = 224, batch_size: int = 32):
+def predict(model, frame: pd.DataFrame, device: str, transform, batch_size: int = 32):
     """Puntuaciones del modelo sobre un DataFrame normalizado."""
     loader = DataLoader(
-        SkinLesionDataset(frame, build_transform("baseline", size=size, train=False)),
+        SkinLesionDataset(frame, transform),
         batch_size=batch_size,
         shuffle=False,
     )
@@ -52,12 +52,10 @@ def evaluate_run(run_dir: str | Path, device: str = "cpu", n_boot: int = 1000) -
 
     model, meta = load_checkpoint(ckpt_path, device=device)
     test = pd.read_csv(test_path)
-    size = meta.get("config", {}).get("model", {}).get("image_size", 224)
-
     # Umbral heredado de validacion: no se recalibra sobre el test.
     threshold = meta.get("threshold", 0.5)
 
-    scores, targets = predict(model, test, device, size=size)
+    scores, targets = predict(model, test, device, eval_transform(meta))
     metrics = compute_metrics(targets, scores, threshold)
     auc_lo, auc_hi = bootstrap_ci(targets, scores, "auc", n_boot=n_boot, threshold=threshold)
     sens_lo, sens_hi = bootstrap_ci(

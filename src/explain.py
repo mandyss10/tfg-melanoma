@@ -34,7 +34,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 from pytorch_grad_cam import GradCAM  # noqa: E402
 from pytorch_grad_cam.utils.model_targets import BinaryClassifierOutputTarget  # noqa: E402
 
-from src.data.transforms import IMAGENET_MEAN, IMAGENET_STD, build_transform  # noqa: E402
+from src.data.transforms import IMAGENET_MEAN, IMAGENET_STD, eval_transform  # noqa: E402
 from src.models.classifier import load_checkpoint  # noqa: E402
 
 
@@ -71,9 +71,8 @@ def explain_run(
     model, meta = load_checkpoint(run_dir / "best.pth", device=device)
     test = pd.read_csv(run_dir / "test_split.csv")
 
-    size = meta.get("config", {}).get("model", {}).get("image_size", 224)
     threshold = meta.get("threshold", 0.5)
-    tf = build_transform("baseline", size=size, train=False)
+    tf = eval_transform(meta)
 
     scores_path = run_dir / "test_scores.npy"
     if not scores_path.exists():
@@ -149,8 +148,7 @@ def explain_array(rgb: np.ndarray, model, meta: dict, device: str = "cpu") -> tu
 
     Recibe el modelo ya cargado para que la app no lo relea en cada foto.
     """
-    size = meta.get("config", {}).get("model", {}).get("image_size", 224)
-    tf = build_transform("baseline", size=size, train=False)
+    tf = eval_transform(meta)
     tensor = tf(image=rgb)["image"].unsqueeze(0).to(device)
 
     with torch.no_grad():

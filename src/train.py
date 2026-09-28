@@ -197,9 +197,12 @@ def main():
         cfg["transform"]["name"],
         size=size,
         train=True,
+        preprocess=cfg.get("preprocess"),
         **cfg["transform"].get("kwargs", {}),
     )
-    tf_eval = build_transform("baseline", size=size, train=False)
+    tf_eval = build_transform(
+        "baseline", size=size, train=False, preprocess=cfg.get("preprocess")
+    )
 
     n_workers = cfg["train"].get("num_workers", 0)
     sampler = mobile_sampler(frames["train"], cfg["train"].get("mobile_fraction"))

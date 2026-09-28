@@ -20,6 +20,8 @@ import albumentations as A
 import cv2
 from albumentations.pytorch import ToTensorV2
 
+from src.data.preprocess import Preprocesado
+
 # Estadisticas de ImageNet: los backbones preentrenados las esperan.
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_STD = (0.229, 0.224, 0.225)
@@ -137,8 +139,18 @@ def mobile_domain_transform(size: int = 224, train: bool = True, strength: float
     )
 
 
-def build_transform(name: str, size: int = 224, train: bool = True, **kwargs) -> A.Compose:
-    """Selector por nombre, para poder fijarlo desde un fichero de configuracion."""
+def build_transform(
+    name: str,
+    size: int = 224,
+    train: bool = True,
+    preprocess: dict | None = None,
+    **kwargs,
+) -> A.Compose:
+    """Selector por nombre, para poder fijarlo desde un fichero de configuracion.
+
+    `preprocess` ({"pelo": bool, "color": bool}) antepone el preprocesado de
+    src.data.preprocess. Tiene que ser el MISMO en entrenamiento y evaluacion.
+    """
     builders = {
         "baseline": baseline_transform,
         "mobile": mobile_domain_transform,
@@ -147,4 +159,18 @@ def build_transform(name: str, size: int = 224, train: bool = True, **kwargs) ->
         raise ValueError(f"transform desconocida: {name!r}. Opciones: {list(builders)}")
     if name == "baseline":
         kwargs.pop("strength", None)
-    return builders[name](size=size, train=train, **kwargs)
+    pipeline = builders[name](size=size, train=train, **kwargs)
+    if preprocess and any(preprocess.values()):
+        pipeline = A.Compose([Preprocesado(**preprocess), *pipeline.transforms])
+    return pipeline
+
+
+def eval_transform(meta: dict) -> A.Compose:
+    """Transformacion de evaluacion coherente con la de entrenamiento del checkpoint."""
+    cfg = meta.get("config", {})
+    return build_transform(
+        "baseline",
+        size=cfg.get("model", {}).get("image_size", 224),
+        train=False,
+        preprocess=cfg.get("preprocess"),
+    )

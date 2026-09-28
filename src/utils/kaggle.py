@@ -145,20 +145,23 @@ def inspect(search_root: Path | None = None, max_cols: int = 12) -> str:
     return "\n".join(lineas)
 
 
-def autodetect() -> dict:
+def autodetect(search_root: Path | str | None = None) -> dict:
     """Localiza ISIC y PAD-UFES-20 entre los datasets adjuntos.
 
-    Devuelve un diccionario listo para inyectar en la seccion `data` de una
+    `search_root` permite reutilizarlo fuera de Kaggle (en Colab los datasets se
+    descomprimen en /content/data). Devuelve un diccionario listo para inyectar en la seccion `data` de una
     configuracion. Las claves ausentes indican que ese dataset no esta adjunto.
     """
     resultado: dict = {}
 
-    pad = find_any(FIRMAS_PAD)
+    root = Path(search_root) if search_root else None
+
+    pad = find_any(FIRMAS_PAD, search_root=root)
     if pad:
         resultado["pad_root"] = str(pad[0])
         resultado["pad_metadata"] = pad[1]
 
-    isic = find_any(FIRMAS_ISIC)
+    isic = find_any(FIRMAS_ISIC, search_root=root)
     if isic:
         resultado["isic_root"] = str(isic[0])
         resultado["isic_metadata"] = isic[1]
