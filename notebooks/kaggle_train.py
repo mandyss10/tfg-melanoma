@@ -65,8 +65,13 @@ def celda_comprobacion():
 # =============================================================================
 # CELDA 4 - Construir las configuraciones con las rutas detectadas
 # =============================================================================
-def celda_configs(epochs: int = 15, batch_size: int = 64, image_size: int = 224):
-    """Genera los tres YAML con las rutas reales de este notebook."""
+def celda_configs(
+    epochs: int = 15,
+    batch_size: int = 64,
+    image_size: int = 224,
+    mobile_fraction: float = 0.5,
+):
+    """Genera los YAML de los experimentos con las rutas reales de este notebook."""
     from pathlib import Path
 
     import yaml
@@ -125,6 +130,20 @@ def celda_configs(epochs: int = 15, batch_size: int = 64, image_size: int = 224)
                 "init_from": "/kaggle/working/results/aug/best.pth",
             },
         },
+        # Igual que finetune, pero forzando que una fraccion fija de cada lote
+        # sean fotos de movil (en finetune son ~4%). Se elige entre los dos por
+        # AUC de VALIDACION, nunca mirando el test.
+        "finetune_w": {
+            "transform": {"name": "mobile", "kwargs": {"strength": 1.0}},
+            "data": {**base_data, "use_mobile_in_train": True},
+            "train": {
+                **base_train,
+                "epochs": max(1, epochs // 2),
+                "lr": 5e-5,
+                "init_from": "/kaggle/working/results/aug/best.pth",
+                "mobile_fraction": mobile_fraction,
+            },
+        },
     }
 
     rutas = {}
@@ -154,6 +173,7 @@ def celda_configs(epochs: int = 15, batch_size: int = 64, image_size: int = 224)
 # !python -m src.train --config /kaggle/working/configs/baseline.yaml
 # !python -m src.train --config /kaggle/working/configs/aug.yaml
 # !python -m src.train --config /kaggle/working/configs/finetune.yaml
+# !python -m src.train --config /kaggle/working/configs/finetune_w.yaml
 
 
 # =============================================================================
@@ -162,7 +182,8 @@ def celda_configs(epochs: int = 15, batch_size: int = 64, image_size: int = 224)
 # !python -m src.evaluate --compare \
 #     /kaggle/working/results/baseline \
 #     /kaggle/working/results/aug \
-#     /kaggle/working/results/finetune
+#     /kaggle/working/results/finetune \
+#     /kaggle/working/results/finetune_w
 
 
 # =============================================================================

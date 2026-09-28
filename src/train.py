@@ -22,7 +22,7 @@ import pandas as pd
 import torch
 import torch.nn as nn
 import yaml
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, WeightedRandomSampler
 from tqdm import tqdm
 
 from src.data.datasets import SkinLesionDataset, load_isic, load_pad_ufes
@@ -118,6 +118,28 @@ def build_frames(cfg: dict) -> dict[str, pd.DataFrame]:
     return frames
 
 
+def mobile_sampler(train: pd.DataFrame, fraccion: float | None):
+    """Muestreo que fija que fraccion de cada lote son fotos de movil.
+
+    En finetune las fotos de movil son ~4% del entrenamiento (1.143 frente a
+    25.331 de ISIC) y con un barajado normal apenas pesan. Con fraccion=0.5 la
+    mitad de cada lote es movil. La epoca conserva su tamano, asi que cada foto
+    de movil se ve varias veces por epoca (con augmentation distinta cada vez).
+    """
+    if not fraccion:
+        return None
+    es_movil = (train["domain"] == "mobile").to_numpy()
+    n_movil = es_movil.sum()
+    if n_movil == 0 or n_movil == len(train):
+        return None
+    pesos = np.where(es_movil, fraccion / n_movil, (1 - fraccion) / (len(train) - n_movil))
+    print(f"  muestreo: {fraccion:.0%} de cada lote son fotos de movil "
+          f"({n_movil} imagenes, ~{fraccion * len(train) / n_movil:.1f} vistas por epoca)")
+    return WeightedRandomSampler(
+        torch.as_tensor(pesos, dtype=torch.double), num_samples=len(train), replacement=True
+    )
+
+
 def run_epoch(model, loader, criterion, optimizer, device, train: bool):
     model.train() if train else model.eval()
     total_loss, scores, targets = 0.0, [], []
@@ -151,6 +173,11 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", required=True)
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
+    ap.add_argument(
+        "--resume",
+        action="store_true",
+        help="continuar desde last.pth si existe (por si se corta la sesion)",
+    )
     args = ap.parse_args()
 
     cfg = load_config(args.config)
@@ -175,11 +202,13 @@ def main():
     tf_eval = build_transform("baseline", size=size, train=False)
 
     n_workers = cfg["train"].get("num_workers", 0)
+    sampler = mobile_sampler(frames["train"], cfg["train"].get("mobile_fraction"))
     loaders = {
         "train": DataLoader(
             SkinLesionDataset(frames["train"], tf_train),
             batch_size=cfg["train"]["batch_size"],
-            shuffle=True,
+            shuffle=sampler is None,
+            sampler=sampler,
             num_workers=n_workers,
             drop_last=True,
         ),
@@ -217,8 +246,23 @@ def main():
 
     objetivo_sens = cfg.get("target_sensitivity", 0.95)
     historial, mejor_auc, t0 = [], -1.0, time.time()
+    primera_epoca = 1
 
-    for epoch in range(1, cfg["train"]["epochs"] + 1):
+    # Estado completo para reanudar: Colab desconecta la sesion sin avisar, y
+    # sin optimizador ni scheduler la reanudacion no seria equivalente a haber
+    # entrenado de un tiron.
+    last_path = out_dir / "last.pth"
+    if args.resume and last_path.exists():
+        estado = torch.load(last_path, map_location=device, weights_only=False)
+        model.load_state_dict(estado["state_dict"])
+        optimizer.load_state_dict(estado["optimizer"])
+        scheduler.load_state_dict(estado["scheduler"])
+        historial = estado["historial"]
+        mejor_auc = estado["mejor_auc"]
+        primera_epoca = estado["epoch"] + 1
+        print(f"  reanudando desde la epoca {primera_epoca} ({last_path})")
+
+    for epoch in range(primera_epoca, cfg["train"]["epochs"] + 1):
         tr_loss, _, _ = run_epoch(
             model, loaders["train"], criterion, optimizer, device, True
         )
@@ -251,9 +295,21 @@ def main():
                 config=cfg,
             )
 
-    (out_dir / "history.json").write_text(
-        json.dumps(historial, indent=2), encoding="utf-8"
-    )
+        torch.save(
+            {
+                "state_dict": model.state_dict(),
+                "optimizer": optimizer.state_dict(),
+                "scheduler": scheduler.state_dict(),
+                "epoch": epoch,
+                "historial": historial,
+                "mejor_auc": mejor_auc,
+            },
+            last_path,
+        )
+        (out_dir / "history.json").write_text(
+            json.dumps(historial, indent=2), encoding="utf-8"
+        )
+
     frames["test"].to_csv(out_dir / "test_split.csv", index=False)
 
     print(f"\nmejor AUC de validacion: {mejor_auc:.4f}  ({time.time() - t0:.0f}s)")
