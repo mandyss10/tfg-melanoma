@@ -70,6 +70,7 @@ def celda_configs(
     batch_size: int = 64,
     image_size: int = 224,
     mobile_fraction: float = 0.5,
+    curva: tuple = (0.25, 0.5, 0.75),
 ):
     """Genera los YAML de los experimentos con las rutas reales de este notebook."""
     from pathlib import Path
@@ -146,6 +147,21 @@ def celda_configs(
         },
     }
 
+    # Curva de aprendizaje: finetune_w con solo una parte de las fotos de movil.
+    # Responde a "cuantas fotos de movil hacen falta" y a si merece la pena buscar mas.
+    for frac in curva:
+        experimentos[f"finetune_w_p{round(frac * 100):02d}"] = {
+            "transform": {"name": "mobile", "kwargs": {"strength": 1.0}},
+            "data": {**base_data, "use_mobile_in_train": True, "mobile_train_fraction": frac},
+            "train": {
+                **base_train,
+                "epochs": max(1, epochs // 2),
+                "lr": 5e-5,
+                "init_from": "/kaggle/working/results/aug/best.pth",
+                "mobile_fraction": mobile_fraction,
+            },
+        }
+
     rutas = {}
     for nombre, extra in experimentos.items():
         cfg = {
@@ -160,7 +176,7 @@ def celda_configs(
         with open(p, "w", encoding="utf-8") as f:
             yaml.safe_dump(cfg, f, sort_keys=False, allow_unicode=True)
         rutas[nombre] = str(p)
-        print(f"  {nombre:9} -> {p}")
+        print(f"  {nombre:14} -> {p}")
 
     return rutas
 

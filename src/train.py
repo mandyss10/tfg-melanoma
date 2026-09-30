@@ -98,6 +98,18 @@ def build_frames(cfg: dict) -> dict[str, pd.DataFrame]:
         mob_trainval, test_size=data.get("val_size", 0.3), seed=seed
     )
 
+    # Curva de aprendizaje: solo una fraccion de los PACIENTES de movil de train.
+    # La permutacion es fija, asi que los subconjuntos quedan anidados
+    # (el 25% esta dentro del 50%...). Val y test no cambian.
+    fraccion = data.get("mobile_train_fraction")
+    if fraccion is not None and fraccion < 1:
+        pacientes = np.array(sorted(mob_train["patient_id"].unique()))
+        np.random.default_rng(seed).shuffle(pacientes)
+        elegidos = set(pacientes[: max(1, int(round(fraccion * len(pacientes))))])
+        mob_train = mob_train[mob_train["patient_id"].isin(elegidos)]
+        print(f"  curva de aprendizaje: {fraccion:.0%} de los pacientes de movil "
+              f"({len(elegidos)} pacientes, {len(mob_train)} imagenes)")
+
     # Que parte del movil entra en entrenamiento depende del experimento:
     # baseline y aug no ven ninguna foto de movil; finetune si.
     usar_movil_en_train = data.get("use_mobile_in_train", False)

@@ -144,3 +144,52 @@ def bootstrap_ci(
     lo = float(np.percentile(valores, 100 * alpha / 2))
     hi = float(np.percentile(valores, 100 * (1 - alpha / 2)))
     return lo, hi
+
+
+def paired_auc_test(
+    y_true: np.ndarray,
+    score_a: np.ndarray,
+    score_b: np.ndarray,
+    groups: np.ndarray | None = None,
+    n_boot: int = 2000,
+    alpha: float = 0.05,
+    seed: int = 0,
+) -> dict:
+    """Diferencia de AUC (b - a) entre dos modelos evaluados sobre las MISMAS imagenes.
+
+    Comparar si los intervalos de cada modelo se solapan es demasiado conservador:
+    ambos modelos fallan en muchas de las mismas imagenes, y el bootstrap pareado
+    aprovecha esa correlacion. Se remuestrea por PACIENTE (bootstrap por grupos):
+    hay pacientes con varias lesiones en el test y remuestrear imagenes sueltas
+    daria intervalos artificialmente estrechos.
+
+    Devuelve la diferencia observada, su IC y un p-valor bilateral.
+    """
+    from sklearn.metrics import roc_auc_score
+
+    y_true = np.asarray(y_true)
+    score_a = np.asarray(score_a)
+    score_b = np.asarray(score_b)
+    if groups is None:
+        groups = np.arange(len(y_true))
+    grupos, inv = np.unique(np.asarray(groups), return_inverse=True)
+    indices = [np.flatnonzero(inv == g) for g in range(len(grupos))]
+
+    rng = np.random.default_rng(seed)
+    obs = roc_auc_score(y_true, score_b) - roc_auc_score(y_true, score_a)
+    deltas = []
+    for _ in range(n_boot):
+        idx = np.concatenate([indices[g] for g in rng.integers(0, len(grupos), len(grupos))])
+        if len(np.unique(y_true[idx])) < 2:
+            continue
+        deltas.append(roc_auc_score(y_true[idx], score_b[idx]) - roc_auc_score(y_true[idx], score_a[idx]))
+    deltas = np.asarray(deltas)
+    p = 2 * min((deltas <= 0).mean(), (deltas >= 0).mean())
+    return {
+        "delta_auc": float(obs),
+        "ci_lo": float(np.percentile(deltas, 100 * alpha / 2)),
+        "ci_hi": float(np.percentile(deltas, 100 * (1 - alpha / 2))),
+        "p": float(min(1.0, max(p, 1.0 / len(deltas)))),
+        "n_boot": int(len(deltas)),
+        "n_grupos": int(len(grupos)),
+    }

@@ -22,7 +22,7 @@ from torch.utils.data import DataLoader
 from src.data.datasets import SkinLesionDataset, describe
 from src.data.transforms import eval_transform
 from src.models.classifier import load_checkpoint
-from src.utils.metrics import bootstrap_ci, compute_metrics
+from src.utils.metrics import bootstrap_ci, compute_metrics, paired_auc_test
 
 
 @torch.no_grad()
@@ -78,6 +78,11 @@ def evaluate_run(run_dir: str | Path, device: str = "cpu", n_boot: int = 1000) -
     )
     np.save(run_dir / "test_scores.npy", scores)
 
+    # para los tests pareados (no van al json, que ya esta escrito)
+    resultado["_scores"] = scores
+    resultado["_targets"] = targets
+    resultado["_patients"] = test["patient_id"].astype(str).to_numpy()
+    resultado["_paths"] = test["path"].astype(str).to_numpy()
     return resultado
 
 
@@ -94,9 +99,10 @@ def print_report(res: dict) -> None:
 
 def compare(run_dirs: list[str], device: str = "cpu", n_boot: int = 1000) -> pd.DataFrame:
     """Tabla comparativa: es la tabla de resultados de la memoria."""
-    filas = []
+    filas, resultados = [], []
     for d in run_dirs:
         res = evaluate_run(d, device=device, n_boot=n_boot)
+        resultados.append(res)
         print_report(res)
         filas.append(
             {
@@ -135,6 +141,46 @@ def compare(run_dirs: list[str], device: str = "cpu", n_boot: int = 1000) -> pd.
     df.to_csv(out / "comparison.csv", index=False)
     print(f"\nTabla guardada en {out / 'comparison.csv'}")
 
+    if len(resultados) > 1:
+        pares = paired_tests(resultados)
+        pares.to_csv(out / "paired_tests.csv", index=False)
+        print(f"Tests pareados guardados en {out / 'paired_tests.csv'}")
+
+    return df
+
+
+def paired_tests(resultados: list[dict], n_boot: int = 2000) -> pd.DataFrame:
+    """Cada modelo contra el primero (baseline) y contra el anterior de la lista."""
+    ref = resultados[0]
+    for r in resultados[1:]:
+        # un test pareado solo tiene sentido sobre exactamente las mismas imagenes
+        if not np.array_equal(r["_paths"], ref["_paths"]):
+            raise ValueError(f"{r['run']} no tiene el mismo test que {ref['run']}")
+
+    pares = []
+    for i in range(1, len(resultados)):
+        pares.append((0, i))
+        if i > 1:
+            pares.append((i - 1, i))
+
+    filas = []
+    for a, b in pares:
+        ra, rb = resultados[a], resultados[b]
+        t = paired_auc_test(ref["_targets"], ra["_scores"], rb["_scores"],
+                            groups=ref["_patients"], n_boot=n_boot)
+        filas.append({"A": ra["run"], "B": rb["run"], **t})
+    df = pd.DataFrame(filas)
+
+    print("\n" + "=" * 72)
+    print("TESTS PAREADOS: diferencia de AUC (B - A), bootstrap por paciente")
+    print("=" * 72)
+    for f in filas:
+        minimo = 1 / f["n_boot"]
+        p = f"p < {minimo:.4f}" if f["p"] <= minimo else f"p = {f['p']:.4f}"
+        sig = "significativa" if f["ci_lo"] > 0 or f["ci_hi"] < 0 else "NO significativa"
+        print(f"  {f['B']:>14} vs {f['A']:<14} dAUC={f['delta_auc']:+.4f}  "
+              f"IC95% [{f['ci_lo']:+.4f}, {f['ci_hi']:+.4f}]  {p}  -> {sig}")
+    print(f"  ({filas[0]['n_grupos']} pacientes remuestreados, {filas[0]['n_boot']} repeticiones)")
     return df
 
 
